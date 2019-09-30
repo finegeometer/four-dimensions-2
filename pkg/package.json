@@ -1,0 +1,15 @@
+{
+  "name": "four-dimensions-2",
+  "collaborators": [
+    "finegeometer <finegeometer@gmail.com>"
+  ],
+  "version": "0.0.0",
+  "files": [
+    "four_dimensions_2_bg.wasm",
+    "four_dimensions_2.js",
+    "four_dimensions_2.d.ts"
+  ],
+  "module": "four_dimensions_2.js",
+  "types": "four_dimensions_2.d.ts",
+  "sideEffects": "false"
+}
