@@ -7,8 +7,8 @@ impl World {
     pub fn triangles(&self) -> Vec<Vertex> {
         let iter = ground(-1.5)
             .chain(tree(nalgebra::Vector4::new(-1.5, 0., 0., -5.)))
-            // .chain(tree(nalgebra::Vector4::new(-1.5, 0., 5., 2.)));
-            .chain(tree(nalgebra::Vector4::new(-1.5, 3.5, 0., -10.)));
+            .chain(tree(nalgebra::Vector4::new(-1.5, 0., 5., 2.)));
+        // .chain(tree(nalgebra::Vector4::new(-1.5, 3.5, 0., -10.)));
         iter.collect()
     }
 }
