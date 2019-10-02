@@ -12,28 +12,37 @@ use std::collections::HashSet;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
-/// All of the information stored by the program
 pub struct Model {
+    sender: std::sync::mpsc::Sender<Msg>,
     keys: HashSet<String>,
     fps: Option<fps::FrameCounter>,
-    //
-    pub window: web_sys::Window,
-    pub document: web_sys::Document,
-    pub canvas: web_sys::HtmlCanvasElement,
-    pub info_box: web_sys::HtmlParagraphElement,
+    render: Box<render::RenderFunction>,
 
-    pub slice_slider: web_sys::HtmlInputElement,
-    //
+    window: web_sys::Window,
+    document: web_sys::Document,
+    canvas: web_sys::HtmlCanvasElement,
+    info_box: web_sys::HtmlParagraphElement,
+    slice_slider: web_sys::HtmlInputElement,
+
     four_camera: FourCamera,
     three_camera: ThreeCamera,
     world: world::World,
-    //
-    render: Box<render::RenderFunction>,
+}
+
+pub enum Msg {
+    Click,
+    MouseMove([i32; 2]),
+    MouseWheel(f64),
+    KeyDown(String),
+    KeyUp(String),
+    SliceSliderSlid,
 }
 
 impl Model {
-    pub fn init() -> Result<Self, JsValue> {
-        let window = web_sys::window().ok_or("no global `window` exists")?;
+    pub fn init(
+        window: web_sys::Window,
+        sender: std::sync::mpsc::Sender<Msg>,
+    ) -> Result<Self, JsValue> {
         let document = window
             .document()
             .ok_or("should have a document on window")?;
@@ -63,43 +72,53 @@ impl Model {
 
         let render = render::make_fn(&canvas)?;
 
-        Ok(Model {
+        let canvas_ = canvas.clone();
+        let document_ = document.clone();
+        crate::utils::event_listener(&sender, &canvas, "mousedown", move |_| {
+            if document_.pointer_lock_element().is_none() {
+                canvas_.request_pointer_lock();
+            }
+            Msg::Click
+        })?;
+        crate::utils::event_listener(&sender, &canvas, "mousemove", |evt| {
+            let evt = evt.dyn_into::<web_sys::MouseEvent>().unwrap_throw();
+            Msg::MouseMove([evt.movement_x(), evt.movement_y()])
+        })?;
+        crate::utils::event_listener(&sender, &canvas, "wheel", |evt| {
+            let evt = evt.dyn_into::<web_sys::WheelEvent>().unwrap_throw();
+            Msg::MouseWheel(evt.delta_y())
+        })?;
+        crate::utils::event_listener(&sender, &document, "keydown", |evt| {
+            let evt = evt.dyn_into::<web_sys::KeyboardEvent>().unwrap_throw();
+            Msg::KeyDown(evt.key())
+        })?;
+        crate::utils::event_listener(&sender, &document, "keyup", |evt| {
+            let evt = evt.dyn_into::<web_sys::KeyboardEvent>().unwrap_throw();
+            Msg::KeyUp(evt.key())
+        })?;
+        crate::utils::event_listener(&sender, &slice_slider, "input", |_| Msg::SliceSliderSlid)?;
+
+        Ok(Self {
+            sender,
             keys: HashSet::new(),
             fps: None,
-            //
+            render,
+
             window,
             document,
             canvas,
             info_box,
             slice_slider,
-            //
+
             four_camera: FourCamera::default(),
             three_camera: ThreeCamera::default(),
             world: World::default(),
-            //
-            render,
         })
-    }
-
-    pub fn view(&mut self) -> Result<(), JsValue> {
-        (self.render)(
-            &self.world.triangles(),
-            self.four_camera.projection_matrix(),
-            self.three_camera.projection_matrix(),
-            self.four_camera.position,
-            [1.0, 1.0, 0.1 * self.slice_slider.value_as_number() as f32],
-        )?;
-
-        Ok(())
     }
 
     pub fn update(&mut self, msg: Msg) -> Result<(), JsValue> {
         match msg {
-            Msg::Click => {
-                if !self.pointer_lock() {
-                    self.canvas.request_pointer_lock();
-                }
-            }
+            Msg::Click => {}
             Msg::KeyDown(k) => {
                 self.keys.insert(k.to_lowercase());
             }
@@ -107,7 +126,7 @@ impl Model {
                 self.keys.remove(&k.to_lowercase());
             }
             Msg::MouseMove([x, y]) => {
-                if self.pointer_lock() {
+                if self.document.pointer_lock_element().is_some() {
                     self.four_camera.orientation.horizontal *= nalgebra::UnitQuaternion::new(
                         nalgebra::Vector3::new(0., -x as f32 * 3e-3, 0.),
                     );
@@ -119,24 +138,10 @@ impl Model {
                 }
             }
             Msg::MouseWheel(z) => {
-                if self.pointer_lock() {
+                if self.document.pointer_lock_element().is_some() {
                     self.four_camera.orientation.horizontal *= nalgebra::UnitQuaternion::new(
                         nalgebra::Vector3::new(-z as f32 * 1e-2, 0., 0.),
                     );
-                }
-            }
-            Msg::Frame(time) => {
-                let dt: f64;
-                if let Some(fps) = &mut self.fps {
-                    dt = fps.frame(time);
-
-                    self.info_box.set_inner_text(&format!("{}", fps));
-
-                    self.move_player(dt);
-
-                    self.view()?;
-                } else {
-                    self.fps = Some(<fps::FrameCounter>::new(time));
                 }
             }
             Msg::SliceSliderSlid => {}
@@ -144,6 +149,31 @@ impl Model {
         Ok(())
     }
 
+    pub fn frame(&mut self, time: f64) -> Result<(), JsValue> {
+        let dt: f64;
+        if let Some(fps) = &mut self.fps {
+            dt = fps.frame(time);
+
+            self.info_box.set_inner_text(&format!("{}", fps));
+
+            self.move_player(dt);
+
+            (self.render)(
+                &self.world.triangles(),
+                self.four_camera.projection_matrix(),
+                self.three_camera.projection_matrix(),
+                self.four_camera.position,
+                [1.0, 1.0, 0.1 * self.slice_slider.value_as_number() as f32],
+            )?;
+        } else {
+            self.fps = Some(<fps::FrameCounter>::new(time));
+        }
+
+        Ok(())
+    }
+}
+
+impl Model {
     fn move_player(&mut self, dt: f64) {
         let m = self.four_camera.orientation.horizontal_to_mat() * dt as f32;
         if self.keys.contains(" ") {
@@ -171,18 +201,4 @@ impl Model {
             self.four_camera.position += m * nalgebra::Vector4::new(0., 0., -1., 0.);
         }
     }
-
-    fn pointer_lock(&self) -> bool {
-        self.document.pointer_lock_element().is_some()
-    }
-}
-
-pub enum Msg {
-    Click,
-    Frame(f64), // time in milliseconds, counted from the start of the program.
-    MouseMove([i32; 2]),
-    MouseWheel(f64),
-    KeyDown(String),
-    KeyUp(String),
-    SliceSliderSlid,
 }
