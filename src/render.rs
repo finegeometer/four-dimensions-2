@@ -5,7 +5,7 @@ mod from_tex;
 mod to_tex;
 
 use std::rc::Rc;
-pub use to_tex::{RenderFunction, Vertex};
+pub use to_tex::{RenderFunction, Uniforms, Vertex};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
@@ -31,7 +31,7 @@ pub fn make_fn(canvas: &web_sys::HtmlCanvasElement) -> Result<Box<RenderFunction
         GL::TEXTURE_2D,
         0,                  // level
         GL::RGBA32F as i32, // internal_format
-        800,                // width
+        1600,               // width
         800,                // height
         0,                  // border
         GL::RGBA,           // format
@@ -48,17 +48,9 @@ pub fn make_fn(canvas: &web_sys::HtmlCanvasElement) -> Result<Box<RenderFunction
     let to_tex = to_tex::make_fn(Rc::clone(&gl), &tex)?;
     let from_tex = from_tex::make_fn(gl)?;
 
-    Ok(Box::new(
-        move |data, four_camera, three_camera, three_camera_pos, three_screen_size| {
-            to_tex(
-                data,
-                four_camera,
-                three_camera,
-                three_camera_pos,
-                three_screen_size,
-            )?;
-            from_tex(&tex);
-            Ok(())
-        },
-    ))
+    Ok(Box::new(move |uniforms| {
+        to_tex(uniforms)?;
+        from_tex(&tex);
+        Ok(())
+    }))
 }

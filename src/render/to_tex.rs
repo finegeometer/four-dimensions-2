@@ -40,7 +40,7 @@ in vec4 vdata;
 
 out vec4 color;
 
-uniform vec4 three_camera_pos;
+uniform vec4 four_camera_pos;
 uniform sampler2D tex;
 uniform vec3 three_screen_size;
 
@@ -123,7 +123,7 @@ void main() {
     if (abs(data.x) > three_screen_size.x || abs(data.y) > three_screen_size.y || abs(data.z) > three_screen_size.z || abs(vdata.w) < 0.) {
         // Outside three-screen, so invisible.
         color = vec4(0.);
-    } else if (intersects_scene(three_camera_pos, vpos)) {
+    } else if (intersects_scene(four_camera_pos, vpos)) {
         // Occluded, so invisible.
         color = vec4(0.);
     } else {
@@ -144,13 +144,15 @@ impl Vertex {
     }
 }
 
-pub type RenderFunction = dyn Fn(
-    &[Vertex],
-    nalgebra::Matrix4x5<f32>,
-    nalgebra::Matrix4<f32>,
-    nalgebra::Vector4<f32>,
-    [f32; 3],
-) -> Result<(), JsValue>;
+pub type RenderFunction = dyn Fn(Uniforms) -> Result<(), JsValue>;
+
+pub struct Uniforms {
+    pub vertices: Vec<Vertex>,
+    pub four_camera: nalgebra::Matrix4x5<f32>,
+    pub four_camera_pos: nalgebra::Vector4<f32>,
+    pub three_cameras: [nalgebra::Matrix4<f32>; 2],
+    pub three_screen_size: [f32; 3],
+}
 
 pub fn make_fn(
     gl: Rc<GL>,
@@ -163,7 +165,7 @@ pub fn make_fn(
     let four_camera_a_loc = program.uniform("four_camera_a")?;
     let four_camera_b_loc = program.uniform("four_camera_b")?;
     let three_camera_loc = program.uniform("three_camera")?;
-    let three_camera_pos_loc = program.uniform("three_camera_pos")?;
+    let four_camera_pos_loc = program.uniform("four_camera_pos")?;
     let three_screen_size_loc = program.uniform("three_screen_size")?;
     let texture_loc = program.uniform("tex")?;
 
@@ -208,74 +210,91 @@ pub fn make_fn(
     gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_S, GL::CLAMP_TO_EDGE as i32);
     gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE as i32);
 
-    let render: Box<RenderFunction> = Box::new(
-        move |vertices, four_camera, three_camera, three_camera_pos, three_screen_size| {
-            let data: Vec<f32> = vertices.iter().flat_map(|v| v.iter()).copied().collect();
+    let render: Box<RenderFunction> = Box::new(move |uniforms| {
+        let data: Vec<f32> = uniforms
+            .vertices
+            .iter()
+            .flat_map(|v| v.iter())
+            .copied()
+            .collect();
 
-            gl.bind_framebuffer(GL::FRAMEBUFFER, Some(&framebuffer));
-            gl.bind_vertex_array(Some(&vao));
+        gl.bind_framebuffer(GL::FRAMEBUFFER, Some(&framebuffer));
+        gl.bind_vertex_array(Some(&vao));
 
-            gl.bind_buffer(GL::ARRAY_BUFFER, Some(&vertex_buffer));
-            gl.buffer_data_with_array_buffer_view(
-                GL::ARRAY_BUFFER,
-                &as_f32_array(&data)?.into(),
-                GL::STATIC_DRAW,
-            );
+        gl.bind_buffer(GL::ARRAY_BUFFER, Some(&vertex_buffer));
+        gl.buffer_data_with_array_buffer_view(
+            GL::ARRAY_BUFFER,
+            &as_f32_array(&data)?.into(),
+            GL::STATIC_DRAW,
+        );
 
-            gl.viewport(0, 0, 800, 800);
-            gl.clear_color(0., 0., 0., 1.);
-            gl.clear(GL::COLOR_BUFFER_BIT);
+        gl.clear_color(0., 0., 0., 1.);
+        gl.clear(GL::COLOR_BUFFER_BIT);
 
-            gl.use_program(Some(&program));
-            gl.bind_vertex_array(Some(&vao));
+        gl.use_program(Some(&program));
+        gl.bind_vertex_array(Some(&vao));
 
-            gl.uniform_matrix4fv_with_f32_array(
-                Some(&four_camera_a_loc),
-                false,
-                &four_camera
-                    .fixed_slice::<nalgebra::U4, nalgebra::U4>(0, 0)
-                    .into_iter()
-                    .copied()
-                    .collect::<Vec<_>>(),
-            );
+        gl.uniform_matrix4fv_with_f32_array(
+            Some(&four_camera_a_loc),
+            false,
+            &uniforms
+                .four_camera
+                .fixed_slice::<nalgebra::U4, nalgebra::U4>(0, 0)
+                .into_iter()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
 
-            gl.uniform4f(
-                Some(&four_camera_b_loc),
-                four_camera[(0, 4)],
-                four_camera[(1, 4)],
-                four_camera[(2, 4)],
-                four_camera[(3, 4)],
-            );
+        gl.uniform4f(
+            Some(&four_camera_b_loc),
+            uniforms.four_camera[(0, 4)],
+            uniforms.four_camera[(1, 4)],
+            uniforms.four_camera[(2, 4)],
+            uniforms.four_camera[(3, 4)],
+        );
 
-            gl.uniform_matrix4fv_with_f32_array(
-                Some(&three_camera_loc),
-                false,
-                &three_camera.into_iter().copied().collect::<Vec<_>>(),
-            );
+        gl.uniform4f(
+            Some(&four_camera_pos_loc),
+            uniforms.four_camera_pos[0],
+            uniforms.four_camera_pos[1],
+            uniforms.four_camera_pos[2],
+            uniforms.four_camera_pos[3],
+        );
 
-            gl.uniform4f(
-                Some(&three_camera_pos_loc),
-                three_camera_pos[0],
-                three_camera_pos[1],
-                three_camera_pos[2],
-                three_camera_pos[3],
-            );
+        gl.uniform3f(
+            Some(&three_screen_size_loc),
+            uniforms.three_screen_size[0],
+            uniforms.three_screen_size[1],
+            uniforms.three_screen_size[2],
+        );
 
-            gl.uniform3f(
-                Some(&three_screen_size_loc),
-                three_screen_size[0],
-                three_screen_size[1],
-                three_screen_size[2],
-            );
+        gl.bind_texture(GL::TEXTURE_2D, Some(&texture));
+        gl.uniform1i(Some(&texture_loc), 0);
 
-            gl.bind_texture(GL::TEXTURE_2D, Some(&texture));
-            gl.uniform1i(Some(&texture_loc), 0);
+        gl.viewport(0, 0, 800, 800);
+        gl.uniform_matrix4fv_with_f32_array(
+            Some(&three_camera_loc),
+            false,
+            &uniforms.three_cameras[0]
+                .into_iter()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
+        gl.draw_arrays(GL::TRIANGLES, 0, (data.len() / 6) as i32);
 
-            gl.draw_arrays(GL::TRIANGLES, 0, (data.len() / 6) as i32);
+        gl.viewport(800, 0, 800, 800);
+        gl.uniform_matrix4fv_with_f32_array(
+            Some(&three_camera_loc),
+            false,
+            &uniforms.three_cameras[1]
+                .into_iter()
+                .copied()
+                .collect::<Vec<_>>(),
+        );
+        gl.draw_arrays(GL::TRIANGLES, 0, (data.len() / 6) as i32);
 
-            Ok(())
-        },
-    );
+        Ok(())
+    });
 
     Ok(render)
 }

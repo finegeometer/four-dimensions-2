@@ -57,7 +57,7 @@ pub fn make_fn(gl: Rc<GL>) -> Result<impl 'static + Fn(&web_sys::WebGlTexture), 
         gl.bind_framebuffer(GL::FRAMEBUFFER, None);
         gl.bind_vertex_array(Some(&vao));
 
-        gl.viewport(0, 0, 800, 800);
+        gl.viewport(0, 0, 1600, 800);
         gl.clear_color(0., 0., 0., 1.);
         gl.clear(GL::COLOR_BUFFER_BIT);
 

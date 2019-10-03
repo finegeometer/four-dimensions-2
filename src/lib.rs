@@ -26,9 +26,8 @@ pub fn run() -> Result<(), JsValue> {
         std::rc::Rc::new(std::cell::RefCell::new(None));
     let g = f.clone();
 
-    let window_ = window.clone();
     let mut closure = move |time: f64| -> Result<(), JsValue> {
-        window_
+        model
             .request_animation_frame(f.borrow().as_ref().unwrap_throw().as_ref().unchecked_ref())?;
 
         for msg in reciever.try_iter() {

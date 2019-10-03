@@ -42,4 +42,10 @@ features = [
   'WebGlVertexArrayObject',
   'WheelEvent',
   'Window',
+
+  'VrDisplay',
+  'VrLayer',
+  'VrFrameData',
+  'Navigator',
+
 ]

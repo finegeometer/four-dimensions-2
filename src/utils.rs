@@ -24,9 +24,7 @@ pub fn event_listener<Msg: 'static>(
 ) -> Result<(), JsValue> {
     let sender = sender.clone();
     let closure: Closure<dyn FnMut(web_sys::Event)> = Closure::wrap(Box::new(move |evt| {
-        sender
-            .send(msg(evt))
-            .expect_throw("Should be unreachable, because the reciever should not be dropped.");
+        sender.send(msg(evt)).unwrap_throw();
     }));
     target.add_event_listener_with_callback(event, closure.as_ref().unchecked_ref())?;
     closure.forget();

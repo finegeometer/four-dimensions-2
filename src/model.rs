@@ -1,11 +1,9 @@
 mod four_camera;
-mod three_camera;
 mod world;
 
 use crate::{fps, render};
 use core::f32::consts::FRAC_PI_2;
 use four_camera::FourCamera;
-use three_camera::ThreeCamera;
 use world::World;
 
 use std::collections::HashSet;
@@ -13,20 +11,28 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 
 pub struct Model {
-    sender: std::sync::mpsc::Sender<Msg>,
     keys: HashSet<String>,
     fps: Option<fps::FrameCounter>,
     render: Box<render::RenderFunction>,
 
     window: web_sys::Window,
     document: web_sys::Document,
-    canvas: web_sys::HtmlCanvasElement,
     info_box: web_sys::HtmlParagraphElement,
     slice_slider: web_sys::HtmlInputElement,
+    vr_status: std::rc::Rc<std::cell::RefCell<VrStatus>>,
 
     four_camera: FourCamera,
-    three_camera: ThreeCamera,
     world: world::World,
+}
+
+#[derive(Clone)]
+enum VrStatus {
+    Searching,
+    NotSupported,
+    NotFound,
+    Known(web_sys::VrDisplay),
+    RequestedPresentation(web_sys::VrDisplay),
+    Presenting(web_sys::VrDisplay),
 }
 
 pub enum Msg {
@@ -36,6 +42,9 @@ pub enum Msg {
     KeyDown(String),
     KeyUp(String),
     SliceSliderSlid,
+
+    GotVRDisplays(js_sys::Array),
+    DisplayPresenting(web_sys::VrDisplay),
 }
 
 impl Model {
@@ -51,7 +60,7 @@ impl Model {
         let canvas = document
             .create_element("canvas")?
             .dyn_into::<web_sys::HtmlCanvasElement>()?;
-        canvas.set_attribute("width", "800")?;
+        canvas.set_attribute("width", "1600")?;
         canvas.set_attribute("height", "800")?;
         body.append_child(&canvas)?;
 
@@ -72,12 +81,39 @@ impl Model {
 
         let render = render::make_fn(&canvas)?;
 
+        let vr_status = std::rc::Rc::new(std::cell::RefCell::new(VrStatus::Searching));
+
         let canvas_ = canvas.clone();
         let document_ = document.clone();
+        let vr_status_ = vr_status.clone();
+        let sender_ = sender.clone();
         crate::utils::event_listener(&sender, &canvas, "mousedown", move |_| {
             if document_.pointer_lock_element().is_none() {
                 canvas_.request_pointer_lock();
             }
+
+            if let VrStatus::Known(display) = vr_status_.borrow().clone() {
+                *vr_status_.borrow_mut() = VrStatus::RequestedPresentation(display.clone());
+
+                let mut layer = web_sys::VrLayer::new();
+                layer.source(Some(&canvas_));
+                let layers = js_sys::Array::new();
+                layers.set(0, layer.as_ref().clone());
+
+                let display_ = display.clone();
+                let sender_ = sender_.clone();
+                let closure = Closure::once(move |_| {
+                    sender_
+                        .send(Msg::DisplayPresenting(display_))
+                        .unwrap_throw()
+                });
+                display
+                    .request_present(&layers)
+                    .unwrap_throw()
+                    .then(&closure);
+                closure.forget();
+            }
+
             Msg::Click
         })?;
         crate::utils::event_listener(&sender, &canvas, "mousemove", |evt| {
@@ -98,20 +134,37 @@ impl Model {
         })?;
         crate::utils::event_listener(&sender, &slice_slider, "input", |_| Msg::SliceSliderSlid)?;
 
+        let navigator: web_sys::Navigator = window.navigator();
+
+        let sender_ = sender.clone();
+        if js_sys::Reflect::has(&navigator, &"getVRDisplays".into())? {
+            let closure = Closure::once(move |vr_displays| {
+                sender_
+                    .send(Msg::GotVRDisplays(js_sys::Array::from(&vr_displays)))
+                    .unwrap_throw();
+            });
+            navigator.get_vr_displays()?.then(&closure);
+            closure.forget();
+        } else {
+            web_sys::console::error_1(
+                &"WebVR is not supported by this browser, on this computer.".into(),
+            );
+
+            *vr_status.borrow_mut() = VrStatus::NotSupported
+        }
+
         Ok(Self {
-            sender,
             keys: HashSet::new(),
             fps: None,
             render,
 
             window,
             document,
-            canvas,
             info_box,
             slice_slider,
+            vr_status,
 
             four_camera: FourCamera::default(),
-            three_camera: ThreeCamera::default(),
             world: World::default(),
         })
     }
@@ -145,6 +198,16 @@ impl Model {
                 }
             }
             Msg::SliceSliderSlid => {}
+            Msg::GotVRDisplays(vr_displays) => {
+                if vr_displays.length() == 0 {
+                    *self.vr_status.borrow_mut() = VrStatus::NotFound;
+                } else {
+                    *self.vr_status.borrow_mut() = VrStatus::Known(vr_displays.get(0).dyn_into()?);
+                }
+            }
+            Msg::DisplayPresenting(display) => {
+                *self.vr_status.borrow_mut() = VrStatus::Presenting(display)
+            }
         }
         Ok(())
     }
@@ -158,18 +221,47 @@ impl Model {
 
             self.move_player(dt);
 
-            (self.render)(
-                &self.world.triangles(),
-                self.four_camera.projection_matrix(),
-                self.three_camera.projection_matrix(),
-                self.four_camera.position,
-                [1.0, 1.0, 0.1 * self.slice_slider.value_as_number() as f32],
-            )?;
+            (self.render)(render::Uniforms {
+                vertices: self.world.triangles(),
+                four_camera: self.four_camera.projection_matrix(),
+                four_camera_pos: self.four_camera.position,
+                three_screen_size: [1., 1., 0.1 * self.slice_slider.value_as_number() as f32],
+                three_cameras: if let VrStatus::Presenting(display) =
+                    self.vr_status.borrow().clone()
+                {
+                    let frame_data = web_sys::VrFrameData::new()?;
+                    display.get_frame_data(&frame_data);
+
+                    [
+                        (nalgebra::Matrix4::from_iterator(frame_data.left_projection_matrix()?)
+                            * nalgebra::Matrix4::from_iterator(frame_data.left_view_matrix()?)),
+                        (nalgebra::Matrix4::from_iterator(frame_data.right_projection_matrix()?)
+                            * nalgebra::Matrix4::from_iterator(frame_data.right_view_matrix()?)),
+                    ]
+                } else {
+                    [
+                        nalgebra::Matrix4::new(
+                            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., -1., 2.98, 0., 0., -1., 3.,
+                        ),
+                        nalgebra::Matrix4::new(
+                            1., 0., 0., 0., 0., 1., 0., 0., 0., 0., -1., 2.98, 0., 0., -1., 3.,
+                        ),
+                    ]
+                },
+            })?;
         } else {
             self.fps = Some(<fps::FrameCounter>::new(time));
         }
 
         Ok(())
+    }
+
+    pub fn request_animation_frame(&self, callback: &js_sys::Function) -> Result<i32, JsValue> {
+        if let VrStatus::Presenting(display) = self.vr_status.borrow().clone() {
+            display.request_animation_frame(callback)
+        } else {
+            self.window.request_animation_frame(callback)
+        }
     }
 }
 
