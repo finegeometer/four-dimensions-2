@@ -52,8 +52,6 @@ impl Model {
         window: web_sys::Window,
         sender: std::sync::mpsc::Sender<Msg>,
     ) -> Result<Self, JsValue> {
-        web_sys::console::log_1(&"Testing: 3".into());
-
         let document = window
             .document()
             .ok_or("should have a document on window")?;
