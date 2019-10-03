@@ -52,7 +52,7 @@ impl Model {
         window: web_sys::Window,
         sender: std::sync::mpsc::Sender<Msg>,
     ) -> Result<Self, JsValue> {
-        web_sys::console::log_1(&"Testing: 1".into());
+        web_sys::console::log_1(&"Testing: 2".into());
 
         let document = window
             .document()
@@ -252,6 +252,10 @@ impl Model {
                     ]
                 },
             })?;
+
+            if let VrStatus::Presenting(display) = self.vr_status.borrow().clone() {
+                display.submit_frame();
+            }
         } else {
             self.fps = Some(<fps::FrameCounter>::new(time));
         }
