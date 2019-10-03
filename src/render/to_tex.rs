@@ -25,7 +25,7 @@ void main() {
 
     vdata = four_camera_a * pos + four_camera_b;
 
-    gl_Position = (three_camera * vdata).yxzw;
+    gl_Position = three_camera * vdata.yxzw;
 }
 
 "#;
