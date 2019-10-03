@@ -52,7 +52,7 @@ impl Model {
         window: web_sys::Window,
         sender: std::sync::mpsc::Sender<Msg>,
     ) -> Result<Self, JsValue> {
-        web_sys::console::log_1(&"Testing: 2".into());
+        web_sys::console::log_1(&"Testing: 3".into());
 
         let document = window
             .document()
