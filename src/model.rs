@@ -52,6 +52,8 @@ impl Model {
         window: web_sys::Window,
         sender: std::sync::mpsc::Sender<Msg>,
     ) -> Result<Self, JsValue> {
+        web_sys::console::log_1(&"Testing: 1".into());
+
         let document = window
             .document()
             .ok_or("should have a document on window")?;
@@ -92,7 +94,8 @@ impl Model {
                 canvas_.request_pointer_lock();
             }
 
-            if let VrStatus::Known(display) = vr_status_.borrow().clone() {
+            let temp = vr_status_.borrow().clone();
+            if let VrStatus::Known(display) = temp {
                 *vr_status_.borrow_mut() = VrStatus::RequestedPresentation(display.clone());
 
                 let mut layer = web_sys::VrLayer::new();
@@ -150,7 +153,7 @@ impl Model {
                 &"WebVR is not supported by this browser, on this computer.".into(),
             );
 
-            *vr_status.borrow_mut() = VrStatus::NotSupported
+            *vr_status.borrow_mut() = VrStatus::NotSupported;
         }
 
         Ok(Self {
