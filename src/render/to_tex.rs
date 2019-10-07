@@ -1,4 +1,5 @@
 use super::program::Program;
+use super::Renderable;
 use crate::utils::as_f32_array;
 use std::rc::Rc;
 use wasm_bindgen::prelude::*;
@@ -30,109 +31,6 @@ void main() {
 
 "#;
 
-const FRAGMENT_SHADER: &str = r#"#version 300 es
-
-precision mediump float;
-
-in vec4 vpos;
-in vec2 vtexcoord;
-in vec4 vdata;
-
-out vec4 color;
-
-uniform vec4 four_camera_pos;
-uniform sampler2D tex;
-uniform vec3 three_screen_size;
-
-vec2 clip(vec2 minmax, vec4 pos, vec4 target, vec4 abcd, float e) {
-    float x = dot(abcd, pos) + e;
-    float y = dot(abcd, target) + e;
-
-    if (x > y) {
-        minmax.x = max(minmax.x, x/(x-y));
-    } else {
-        minmax.y = min(minmax.y, x/(x-y));
-    }
-
-    return minmax;
-}
-
-bool intersects_foliage(vec4 pos, vec4 target) {
-    pos.x -= 6.;
-    target.x -= 6.;
-    vec2 minmax = vec2(0., 0.999);
-
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(-1., 0., 0., 0.), -5.);
-
-    minmax = clip(minmax, pos, target, vec4(0.2 * 2.618034, 1.618034, 1., 0.), 0.);
-    minmax = clip(minmax, pos, target, vec4(0.2 * 2.618034, 1.618034, -1., 0.), 0.);
-    minmax = clip(minmax, pos, target, vec4(0.2 * 2.618034, -1.618034, 1., 0.), 0.);
-    minmax = clip(minmax, pos, target, vec4(0.2 * 2.618034, -1.618034, -1., 0.), 0.);
-
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0.2 * 2.618034, 1.618034, 1., 0.), 0.);
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0.2 * 2.618034, 1.618034, -1., 0.), 0.);
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0.2 * 2.618034, -1.618034, 1., 0.), 0.);
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0.2 * 2.618034, -1.618034, -1., 0.), 0.);
-
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0.2 * 2.618034, 1.618034, 1., 0.), 0.);
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0.2 * 2.618034, 1.618034, -1., 0.), 0.);
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0.2 * 2.618034, -1.618034, 1., 0.), 0.);
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0.2 * 2.618034, -1.618034, -1., 0.), 0.);
-
-    return minmax.y > minmax.x;
-}
-
-bool intersects_trunk(vec4 pos, vec4 target) {
-    vec2 minmax = vec2(0., 0.999);
-
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(-1., 0., 0., 0.), 0.);
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(1., 0., 0., 0.), -1.);
-
-    minmax = clip(minmax, pos, target, vec4(0., 1.618034, 1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos, target, vec4(0., 1.618034, -1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos, target, vec4(0., -1.618034, 1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos, target, vec4(0., -1.618034, -1., 0.), -0.25 * 2.618034);
-
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0., 1.618034, 1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0., 1.618034, -1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0., -1.618034, 1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos.xzwy, target.xzwy, vec4(0., -1.618034, -1., 0.), -0.25 * 2.618034);
-
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0., 1.618034, 1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0., 1.618034, -1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0., -1.618034, 1., 0.), -0.25 * 2.618034);
-    minmax = clip(minmax, pos.xwyz, target.xwyz, vec4(0., -1.618034, -1., 0.), -0.25 * 2.618034);
-
-    return minmax.y > minmax.x;
-}
-
-bool intersects_tree(vec4 pos, vec4 target) {
-    return intersects_foliage(pos, target) || intersects_trunk(pos, target) || target.x < -1.5;
-}
-
-bool intersects_scene(vec4 pos, vec4 target) {
-    vec4 tree1 = vec4(-1.5, 0., 0., -5.);
-    vec4 tree2 = vec4(-1.5, 0., 5., 2.);
-    return intersects_tree(pos - tree1, target - tree1) || intersects_tree(pos - tree2, target - tree2);
-}
-
-void main() {
-
-    vec3 data = vdata.xyz / vdata.w;
-
-    if (abs(data.x) > three_screen_size.x || abs(data.y) > three_screen_size.y || abs(data.z) > three_screen_size.z || abs(vdata.w) < 0.) {
-        // Outside three-screen, so invisible.
-        color = vec4(0.);
-    } else if (intersects_scene(four_camera_pos, vpos)) {
-        // Occluded, so invisible.
-        color = vec4(0.);
-    } else {
-        color = texture(tex, vtexcoord) / 5.0;
-    }
-}
-
-"#;
-
 pub struct Vertex {
     pub pos: nalgebra::Vector4<f32>,
     pub texcoord: [f32; 2],
@@ -147,7 +45,6 @@ impl Vertex {
 pub type RenderFunction = dyn Fn(Uniforms) -> Result<(), JsValue>;
 
 pub struct Uniforms {
-    pub vertices: Vec<Vertex>,
     pub four_camera: nalgebra::Matrix4x5<f32>,
     pub four_camera_pos: nalgebra::Vector4<f32>,
     pub three_cameras: [nalgebra::Matrix4<f32>; 2],
@@ -157,8 +54,12 @@ pub struct Uniforms {
 pub fn make_fn(
     gl: Rc<GL>,
     render_texture: &web_sys::WebGlTexture,
+    renderable: impl Renderable,
 ) -> Result<Box<RenderFunction>, JsValue> {
-    let program = Program::new(Rc::clone(&gl), VERTEX_SHADER, FRAGMENT_SHADER)?;
+    let vertices: Vec<Vertex> = renderable.triangles().collect();
+    let data: Vec<f32> = vertices.iter().flat_map(|v| v.iter()).copied().collect();
+
+    let program = Program::new(Rc::clone(&gl), VERTEX_SHADER, &renderable.fragment_shader())?;
 
     let pos_loc = program.attribute("pos")?;
     let texcoord_loc = program.attribute("texcoord")?;
@@ -180,6 +81,11 @@ pub fn make_fn(
     gl.vertex_attrib_pointer_with_i32(pos_loc, 4, GL::FLOAT, false, 6 * 4, 0);
     gl.enable_vertex_attrib_array(texcoord_loc);
     gl.vertex_attrib_pointer_with_i32(texcoord_loc, 2, GL::FLOAT, false, 6 * 4, 4 * 4);
+    gl.buffer_data_with_array_buffer_view(
+        GL::ARRAY_BUFFER,
+        &as_f32_array(&data)?.into(),
+        GL::STATIC_DRAW,
+    );
 
     let framebuffer = gl.create_framebuffer().ok_or("create_framebuffer failed")?;
     gl.bind_framebuffer(GL::FRAMEBUFFER, Some(&framebuffer));
@@ -211,22 +117,8 @@ pub fn make_fn(
     gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE as i32);
 
     let render: Box<RenderFunction> = Box::new(move |uniforms| {
-        let data: Vec<f32> = uniforms
-            .vertices
-            .iter()
-            .flat_map(|v| v.iter())
-            .copied()
-            .collect();
-
         gl.bind_framebuffer(GL::FRAMEBUFFER, Some(&framebuffer));
         gl.bind_vertex_array(Some(&vao));
-
-        gl.bind_buffer(GL::ARRAY_BUFFER, Some(&vertex_buffer));
-        gl.buffer_data_with_array_buffer_view(
-            GL::ARRAY_BUFFER,
-            &as_f32_array(&data)?.into(),
-            GL::STATIC_DRAW,
-        );
 
         gl.clear_color(0., 0., 0., 1.);
         gl.clear(GL::COLOR_BUFFER_BIT);

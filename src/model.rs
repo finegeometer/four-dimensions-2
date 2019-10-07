@@ -79,7 +79,8 @@ impl Model {
         slice_slider.set_value("10");
         body.append_child(&slice_slider)?;
 
-        let render = render::make_fn(&canvas)?;
+        let world = World::default();
+        let render = render::make_fn(&canvas, world.to_renderable())?;
 
         let vr_status = std::rc::Rc::new(std::cell::RefCell::new(VrStatus::Searching));
 
@@ -166,7 +167,7 @@ impl Model {
             vr_status,
 
             four_camera: FourCamera::default(),
-            world: World::default(),
+            world,
         })
     }
 
@@ -223,7 +224,6 @@ impl Model {
             self.move_player(dt);
 
             (self.render)(render::Uniforms {
-                vertices: self.world.triangles(),
                 four_camera: self.four_camera.projection_matrix(),
                 four_camera_pos: self.four_camera.position,
                 three_screen_size: [1., 1., 0.1 * self.slice_slider.value_as_number() as f32],

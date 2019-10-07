@@ -4,6 +4,9 @@ mod shader;
 mod from_tex;
 mod to_tex;
 
+mod renderable;
+pub use renderable::{Renderable, Transform};
+
 use std::rc::Rc;
 pub use to_tex::{RenderFunction, Uniforms, Vertex};
 use wasm_bindgen::prelude::*;
@@ -11,7 +14,10 @@ use wasm_bindgen::JsCast;
 
 type GL = web_sys::WebGl2RenderingContext;
 
-pub fn make_fn(canvas: &web_sys::HtmlCanvasElement) -> Result<Box<RenderFunction>, JsValue> {
+pub fn make_fn(
+    canvas: &web_sys::HtmlCanvasElement,
+    renderable: impl Renderable,
+) -> Result<Box<RenderFunction>, JsValue> {
     let gl = canvas
         .get_context("webgl2")?
         .ok_or("\"webgl2\" context identifier not supported.")?
@@ -45,7 +51,7 @@ pub fn make_fn(canvas: &web_sys::HtmlCanvasElement) -> Result<Box<RenderFunction
     gl.tex_parameteri(GL::TEXTURE_2D, GL::TEXTURE_WRAP_T, GL::CLAMP_TO_EDGE as i32);
 
     let gl = Rc::new(gl);
-    let to_tex = to_tex::make_fn(Rc::clone(&gl), &tex)?;
+    let to_tex = to_tex::make_fn(Rc::clone(&gl), &tex, renderable)?;
     let from_tex = from_tex::make_fn(gl)?;
 
     Ok(Box::new(move |uniforms| {
